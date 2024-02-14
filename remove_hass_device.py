@@ -2,6 +2,7 @@
 
 import json
 import codecs
+import os
 import sys
 
 
@@ -42,6 +43,11 @@ config_entry_index_by_entry_id = {config_entries[i]["entry_id"]: i for i in rang
 device_index_by_id = {devices[i]["id"]: i for i in range(len(devices))}
 device_ids_by_name = {device["name"]: device["id"] for device in devices}
 device_ids_by_name_by_user = {device["name_by_user"]: device["id"] for device in devices if device["name_by_user"] is not None}
+device_ids_by_model = {}
+# construct dictionary of lists of devices by model
+for device in devices:
+    if device['model'] is not None:
+        device_ids_by_model.setdefault(device['model'],[]).append(device['id'])
 
 # index the devices by config id to see if there are any configs referenced by multiple devices
 device_ids_by_config_entry_id = {}
@@ -92,13 +98,17 @@ input_name = sys.argv[1]
 print(f"Input: {input_name}")
 target_device_id = None
 if input_name in device_ids_by_name:
-    target_device_id = device_ids_by_name[input_name]
+    target_device_id = [device_ids_by_name[input_name]]
 if (target_device_id is None) and (input_name in device_ids_by_name_by_user):
-    target_device_id = device_ids_by_name_by_user[input_name]
+    target_device_id = [device_ids_by_name_by_user[input_name]]
+if target_device_id is None and (input_name in device_ids_by_model):
+    target_device_id  = device_ids_by_model[input_name]
 # if we identified a target device...
 if target_device_id is not None:
     # gather the full list of devices and dependencies to remove
-    device_id_list = get_device_id_list(target_device_id)
+    device_id_list = []
+    for dev_id in target_device_id:
+        device_id_list.extend(get_device_id_list(dev_id))
     print("Devices to remove:")
     print([device_id + " - " + devices[device_index_by_id[device_id]]["name"] for device_id in device_id_list])
 
@@ -120,8 +130,11 @@ if target_device_id is not None:
     for device_id in device_id_list:
         if device_id in entity_ids_by_device_id:
             entity_id_list.extend(entity_ids_by_device_id[device_id])
+
     print("Entities to remove:")
-    print([entity_id + " - " + entities[entity_index_by_id[entity_id]]["name"] for entity_id in entity_id_list])
+    print([entity_id + " - " + 
+           ( entities[entity_index_by_id[entity_id]]["name"] or
+           entities[entity_index_by_id[entity_id]]["entity_id"] ) for entity_id in entity_id_list])
 
     # now actually remove the elements
     devices = list_without_indexes(devices, device_id_list, device_index_by_id)
@@ -134,6 +147,10 @@ if target_device_id is not None:
     core_device_registry["data"]["devices"] = devices
 
     # and save them out as new files
+
+    os.rename("core.config_entries", "core.config_entries.bak")
     to_json_file("core.config_entries", core_config_entries)
+    os.rename("core.entity_registry", "core.entity_registry.bak")
     to_json_file("core.entity_registry", core_entity_registry)
+    os.rename("core.device_registry", "core.device_registry.bak")
     to_json_file("core.device_registry", core_device_registry)
